@@ -1,43 +1,38 @@
 import os
-import sys
 import re
 import shutil
 import subprocess
+import sys
+import tarfile
 import urllib.request
 import zipfile
-import tarfile
-
 from distutils.cmd import Command
 from distutils.dir_util import copy_tree, remove_tree
+
+from setuptools import setup
 from setuptools.command.install import install
 from setuptools.command.sdist import sdist
-from setuptools import setup
 
-
-PKG_DIR = '.'
-PKG_NAME = 'is_msgs'
-PROTO_DIR = '../src/'
+PKG_DIR = "."
+PKG_NAME = "is_msgs"
+PROTO_DIR = "../src/"
 PKG_VERSION_PATTERN = r"^[0-9]+\.[0-9]+\.[0-9]+$"
-PKG_VERSION = '1.1.18'
+PKG_VERSION = "1.1.19"
 
 if re.match(PKG_VERSION_PATTERN, PKG_VERSION) is None:
     raise RuntimeError(
-            "Package version must matches the pattern '{}'".format(PKG_VERSION_PATTERN))
-
-major_depencies_list = ['wheel']
-
-for package in major_depencies_list:
-    if package not in sys.modules:
-        python = sys.executable
-        subprocess.check_call([python, '-m', 'pip', 'install', package], stdout=subprocess.DEVNULL)
+        "Package version must matches the pattern '{}'".format(
+            PKG_VERSION_PATTERN
+        )
+    )
 
 
 class MyZipFile(zipfile.ZipFile):
     """
-        Modification necessary to keep execution permission
-        on files aftar extract *.zip files
+    Modification necessary to keep execution permission
+    on files aftar extract *.zip files
 
-        source: https://stackoverflow.com/questions/39296101/python-zipfile-removes-execute-permissions-from-binaries
+    source: https://stackoverflow.com/questions/39296101/python-zipfile-removes-execute-permissions-from-binaries
     """
 
     def extract(self, member, path=None, pwd=None):
@@ -71,35 +66,57 @@ def download_file(filename, url):
 
 
 def download_protoc():
-
-    PROTOC_VERSION = '3.20.3'
-    PROTOC_ZIP_FILE = 'protoc-{}-linux-x86_64.zip'.format(PROTOC_VERSION)
-    PROTOC_BASE_URL = 'https://github.com/google/protobuf/releases/download/v{}/{}'
+    PROTOC_VERSION = "33.6"
+    PROTOC_ZIP_FILE = f"protoc-{PROTOC_VERSION}-linux-x86_64.zip"
+    PROTOC_BASE_URL = (
+        "https://github.com/google/protobuf/releases/download/v{}/{}"
+    )
     PROTOC_URL = PROTOC_BASE_URL.format(PROTOC_VERSION, PROTOC_ZIP_FILE)
 
     download_file(PROTOC_ZIP_FILE, PROTOC_URL)
-    protoc_zip = MyZipFile(PROTOC_ZIP_FILE, 'r')
-    protoc_zip.extractall(path='protoc')
+
+    protoc_zip = MyZipFile(PROTOC_ZIP_FILE, "r")
+    protoc_zip.extractall(path="protoc")
     protoc_zip.close()
+
+    # FIX PERMISSIONS RECURSIVELY
+    for root, dirs, files in os.walk("protoc"):
+        for d in dirs:
+            os.chmod(os.path.join(root, d), 0o755)
+        for f in files:
+            path = os.path.join(root, f)
+            os.chmod(path, 0o755)
 
 
 def download_protoc_gen_doc():
 
-    PLUGIN_VERSION = '1.1.0'
-    GOLANG_VERSION = '1.10'
-    PLUGIN_TAR_FILE = 'protoc-gen-doc-{}.linux-amd64.go{}.tar.gz'.format(
-        PLUGIN_VERSION, GOLANG_VERSION)
-    PLUGIN_BASE_URL = "https://github.com/pseudomuto/protoc-gen-doc/releases/download/v{}/{}"
+    PLUGIN_VERSION = "1.1.0"
+    GOLANG_VERSION = "1.10"
+    PLUGIN_TAR_FILE = "protoc-gen-doc-{}.linux-amd64.go{}.tar.gz".format(
+        PLUGIN_VERSION, GOLANG_VERSION
+    )
+    PLUGIN_BASE_URL = (
+        "https://github.com/pseudomuto/protoc-gen-doc/releases/download/v{}/{}"
+    )
     PLUGIN_URL = PLUGIN_BASE_URL.format(PLUGIN_VERSION, PLUGIN_TAR_FILE)
 
     download_file(PLUGIN_TAR_FILE, PLUGIN_URL)
-    plugin_tar = tarfile.open(name=PLUGIN_TAR_FILE, mode='r:gz')
+    plugin_tar = tarfile.open(name=PLUGIN_TAR_FILE, mode="r:gz")
     plugin_tar.extractall()
     plugin_tar.close()
 
-    extracted_folder = PLUGIN_TAR_FILE.replace('.tar.gz', '')
-    copy_tree(extracted_folder, 'protoc-gen-doc')
+    extracted_folder = PLUGIN_TAR_FILE.replace(".tar.gz", "")
+    copy_tree(extracted_folder, "protoc-gen-doc")
     remove_tree(extracted_folder)
+    plugin_bin = os.path.join("protoc-gen-doc", "protoc-gen-doc")
+    if os.path.exists(plugin_bin):
+        os.chmod(plugin_bin, 0o755)
+    for root, dirs, files in os.walk("protoc-gen-doc"):
+        for d in dirs:
+            os.chmod(os.path.join(root, d), 0o755)
+        for f in files:
+            path = os.path.join(root, f)
+            os.chmod(path, 0o755)
 
 
 class InstallWrapper(install):
@@ -124,30 +141,44 @@ class InstallWrapper(install):
         artifacts = self._list_pb2_artifacts()
         for artifact in artifacts:
             artifact_file_path = os.path.join(self.pkg_path, artifact)
-            with open(artifact_file_path, 'r') as f:
-                output = re.sub(r'([^ ]import) ([a-zA-Z]+[\w]*_pb2[ as])', r'\1 is_msgs.\2',
-                                f.read())
-            with open(artifact_file_path, 'w') as f:
+            with open(artifact_file_path, "r") as f:
+                output = re.sub(
+                    r"([^ ]import) ([a-zA-Z]+[\w]*_pb2[ as])",
+                    r"\1 is_msgs.\2",
+                    f.read(),
+                )
+            with open(artifact_file_path, "w") as f:
                 f.write(output)
 
     def _list_pb2_artifacts(self):
-        return [f for f in os.listdir(self.pkg_path) if f.endswith('pb2.py')]
+        return [f for f in os.listdir(self.pkg_path) if f.endswith("pb2.py")]
 
     def _run_protoc_command(self, base_dir, protos):
-        protos_str_list = ' '.join(protos)
-        protoc_command = """
-        ./protoc/bin/protoc    \
-            -I./protoc/include \
-            --proto_path={}    \
-            --python_out={} {}""".format(base_dir, base_dir, protos_str_list)
-        subprocess.call(['bash', '-c', protoc_command])
+        protoc_bin = os.path.abspath(os.path.join("protoc", "bin", "protoc"))
+        protoc_include = os.path.abspath(os.path.join("protoc", "include"))
+
+        if os.path.exists(protoc_bin):
+            os.chmod(protoc_bin, 0o755)
+
+        protos_str_list = " ".join(protos)
+
+        protoc_command = f"""
+        {protoc_bin} \
+            -I{protoc_include} \
+            --proto_path={base_dir} \
+            --python_out={base_dir} {protos_str_list}
+        """
+
+        subprocess.call(["bash", "-c", protoc_command])
 
     def _list_proto_files(self):
         if os.path.exists(PROTO_DIR):
-            proto_files_path = os.path.join(PROTO_DIR, 'is/msgs')
+            proto_files_path = os.path.join(PROTO_DIR, "is/msgs")
         else:
-            proto_files_path = os.path.join(PKG_DIR, 'is_msgs')
-        protos = [f for f in os.listdir(proto_files_path) if f.endswith('.proto')]
+            proto_files_path = os.path.join(PKG_DIR, "is_msgs")
+        protos = [
+            f for f in os.listdir(proto_files_path) if f.endswith(".proto")
+        ]
         return protos, proto_files_path
 
     def _transform_proto_files(self):
@@ -156,9 +187,11 @@ class InstallWrapper(install):
         for proto in protos:
             shutil.copy(os.path.join(proto_files_path, proto), self.pkg_path)
             proto_pkg_path = os.path.join(self.pkg_path, proto)
-            with open(proto_pkg_path, 'r') as f:
-                output = re.sub(r'import "is/msgs/*', r'import "is_msgs/', f.read())
-            with open(proto_pkg_path, 'w') as f:
+            with open(proto_pkg_path, "r") as f:
+                output = re.sub(
+                    r'import "is/msgs/*', r'import "is_msgs/', f.read()
+                )
+            with open(proto_pkg_path, "w") as f:
                 f.write(output)
 
         return [os.path.join(self.pkg_path, proto) for proto in protos]
@@ -167,7 +200,9 @@ class InstallWrapper(install):
         pkg_path = os.path.join(PKG_DIR, PKG_NAME)
 
         old_artifacts = self._list_pb2_artifacts()
-        old_proto_files = [f for f in os.listdir(pkg_path) if f.endswith('.proto')]
+        old_proto_files = [
+            f for f in os.listdir(pkg_path) if f.endswith(".proto")
+        ]
         for f in old_artifacts + old_proto_files:
             os.remove(os.path.join(pkg_path, f))
 
@@ -188,23 +223,46 @@ class ProtobufDocumentationCommand(Command):
         self.doc_builder.build()
 
 
-class ProtobufDocumentation():
+class ProtobufDocumentation:
 
     def download_tools(self):
         download_protoc()
         download_protoc_gen_doc()
 
+        # Garantir permissão de execução
+        protoc_bin = os.path.join("protoc", "bin", "protoc")
+        if os.path.exists(protoc_bin):
+            os.chmod(protoc_bin, 0o755)
+
+        plugin_bin = os.path.join("protoc-gen-doc", "protoc-gen-doc")
+        if os.path.exists(plugin_bin):
+            os.chmod(plugin_bin, 0o755)
+
     def build(self):
-        proto_files_path = os.path.join(PROTO_DIR, 'is/msgs/')
+        protoc_bin = os.path.abspath(os.path.join("protoc", "bin", "protoc"))
+        plugin_bin = os.path.abspath(
+            os.path.join("protoc-gen-doc", "protoc-gen-doc")
+        )
+
+        if os.path.exists(protoc_bin):
+            os.chmod(protoc_bin, 0o755)
+
+        if os.path.exists(plugin_bin):
+            os.chmod(plugin_bin, 0o755)
+
+        proto_files_path = os.path.join(PROTO_DIR, "is/msgs/")
         proto_files_path += "*.proto"
-        protoc_command = """
-        ./protoc/bin/protoc                                         \
-            --plugin=protoc-gen-doc=./protoc-gen-doc/protoc-gen-doc \
+
+        protoc_command = f"""
+        {protoc_bin} \
+            --plugin=protoc-gen-doc={plugin_bin} \
             --doc_out=../docs/ \
             --doc_opt=markdown,README.md \
-            -I./{} \
-            {}""".format(PROTO_DIR, proto_files_path)
-        subprocess.call(['bash', '-c', protoc_command])
+            -I./{PROTO_DIR} \
+            {proto_files_path}
+        """
+
+        subprocess.call(["bash", "-c", protoc_command])
 
 
 class DistributedWithDocs(sdist):
@@ -220,30 +278,32 @@ class DistributedWithDocs(sdist):
 setup(
     name=PKG_NAME,
     version=PKG_VERSION,
-    description='Package with standard IS messages',
+    description="Package with standard IS messages",
     long_description=open("README.md").read().strip(),
     long_description_content_type="text/markdown",
-    url='http://github.com/labvisio/is-msgs',
-    author='labvisio',
-    author_email='labvisio.ufes@gmail.com',
-    license='MIT',
+    url="http://github.com/labvisio/is-msgs",
+    author="labvisio",
+    author_email="labvisio.ufes@gmail.com",
+    license="MIT",
     classifiers=[
-        'Intended Audience :: Developers',
-        'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.7',
-        'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3.9',
-        'Programming Language :: Python :: 3.10',
-        'Programming Language :: Python :: 3 :: Only',
+        "Intended Audience :: Developers",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
+        "Programming Language :: Python :: 3 :: Only",
     ],
-    package_dir={'': PKG_DIR},
-    packages=[PKG_NAME, PKG_NAME + '.utils'],
-    package_data={PKG_NAME: ['*.proto']},
+    package_dir={"": PKG_DIR},
+    packages=[PKG_NAME, PKG_NAME + ".utils"],
+    package_data={PKG_NAME: ["*.proto"]},
     zip_safe=False,
-    install_requires=['protobuf==3.20.3'],
+    install_requires=["protobuf>=6,<7"],
     cmdclass={
-        'install': InstallWrapper,
-        'sdist': DistributedWithDocs,
-        'build_proto_doc': ProtobufDocumentationCommand,
+        "install": InstallWrapper,
+        "sdist": DistributedWithDocs,
+        "build_proto_doc": ProtobufDocumentationCommand,
     },
 )
