@@ -6,10 +6,9 @@ import sys
 import tarfile
 import urllib.request
 import zipfile
-from distutils.cmd import Command
-from distutils.dir_util import copy_tree, remove_tree
 
-from setuptools import setup
+from setuptools import Command, setup
+from setuptools._distutils.dir_util import copy_tree, remove_tree
 from setuptools.command.install import install
 from setuptools.command.sdist import sdist
 
