@@ -9,7 +9,7 @@ import zipfile
 
 from setuptools import Command, setup
 from setuptools._distutils.dir_util import copy_tree, remove_tree
-from setuptools.command.install import install
+from setuptools.command.build_py import build_py
 from setuptools.command.sdist import sdist
 
 PKG_DIR = "."
@@ -118,7 +118,7 @@ def download_protoc_gen_doc():
             os.chmod(path, 0o755)
 
 
-class InstallWrapper(install):
+class BuildPyWrapper(build_py):
 
     pkg_path = os.path.join(PKG_DIR, PKG_NAME)
 
@@ -127,7 +127,7 @@ class InstallWrapper(install):
         # the Python package is successfully installed
         self._compile_protobufs()
         # Run the standard PyPi copy
-        install.run(self)
+        super().run()
 
     def _compile_protobufs(self):
         download_protoc()
@@ -301,7 +301,7 @@ setup(
     zip_safe=False,
     install_requires=["protobuf>=6,<7"],
     cmdclass={
-        "install": InstallWrapper,
+        "build_py": BuildPyWrapper,
         "sdist": DistributedWithDocs,
         "build_proto_doc": ProtobufDocumentationCommand,
     },
